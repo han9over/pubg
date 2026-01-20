@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 interface Match {
   id: string;
@@ -19,17 +19,31 @@ export default function Home() {
   const [playerName, setPlayerName] = useState('');
   const [opponentName, setOpponentName] = useState('');
   const [currentMatch, setCurrentMatch] = useState<Match | null>(null);
-  const [completedMatchesWithInteractions, setCompletedMatchesWithInteractions] = useState<Match[]>([]);
+  const [matchesWithInteractions, setMatchesWithInteractions] = useState<Match[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [progressMessage, setProgressMessage] = useState('');
+  const [waitCountdown, setWaitCountdown] = useState<number | null>(null);
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout | null = null;
+    if (waitCountdown !== null && waitCountdown > 0) {
+      timer = setInterval(() => {
+        setWaitCountdown((prev) => (prev !== null && prev > 0 ? prev - 1 : null));
+      }, 1000);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [waitCountdown]);
 
   const handleSearch = async () => {
     setLoading(true);
     setError('');
     setCurrentMatch(null);
-    setCompletedMatchesWithInteractions([]);
+    setMatchesWithInteractions([]);
     setProgressMessage('');
+    setWaitCountdown(null);
 
     try {
       const response = await fetch('/api/search', {
@@ -59,18 +73,29 @@ export default function Home() {
 
             if (data.progress) {
               setProgressMessage(data.progress);
-            } else if (data.matches) {
-              // All processing complete - move matches with interactions to final section
-              const matchesWithInteractions = data.matches.filter((m: Match) => m.interactions.length > 0);
-              setCompletedMatchesWithInteractions(matchesWithInteractions);
-              setCurrentMatch(null); // Clear the last single match display
-              setProgressMessage('Processing complete!');
+
+              // Handle wait countdown
+              if (data.progress.includes('Waiting')) {
+                const match = data.progress.match(/Waiting (\d+) seconds/);
+                if (match && match[1]) {
+                  setWaitCountdown(parseInt(match[1], 10));
+                }
+              } else {
+                setWaitCountdown(null);
+              }
             } else if (data.match) {
-              // Individual match completed - display it temporarily
               const match: Match = data.match;
               setCurrentMatch(match);
 
-              // If this match has interactions, we'll add it to the final list later
+              // If this match has interactions, add to persistent list
+              if (match.interactions.length > 0) {
+                setMatchesWithInteractions((prev) => [...prev, match]);
+              }
+            } else if (data.matches) {
+              // Processing complete
+              setCurrentMatch(null);
+              setProgressMessage('Processing complete!');
+              setWaitCountdown(null);
             } else if (data.error) {
               setError(data.error);
             }
@@ -82,9 +107,10 @@ export default function Home() {
     } catch (err) {
       setError('Error fetching data. Check console for details.');
       console.error(err);
+    } finally {
+      setLoading(false);
+      setWaitCountdown(null);
     }
-
-    setLoading(false);
   };
 
   const getHumanMapName = (mapName: string) => {
@@ -137,17 +163,21 @@ export default function Home() {
 
         {error && <p className="text-red-500 mb-4">{error}</p>}
 
-        {/* Current Progress */}
-        {progressMessage && (
+        {/* Progress / Countdown */}
+        {(progressMessage || waitCountdown !== null) && (
           <div className="bg-gray-800 p-4 rounded-lg mb-6 text-center">
-            <p className="text-lg">{progressMessage}</p>
+            <p className="text-lg font-medium">
+              {waitCountdown !== null
+                ? `Waiting ${waitCountdown} seconds for PUBG API rate limit...`
+                : progressMessage}
+            </p>
             <p className="text-sm text-gray-400 mt-2">
-              Note: Processing may pause briefly due to PUBG API rate limits (10 req/min).
+              Note: PUBG API limits to 10 requests per minute.
             </p>
           </div>
         )}
 
-        {/* Currently Processing Match (shown one at a time) */}
+        {/* Current Processing Match */}
         {currentMatch && (
           <div className="bg-gray-800 p-6 rounded-lg shadow-lg mb-8 animate-fade-in">
             <h2 className="text-2xl font-semibold mb-4">Current Match: {currentMatch.id}</h2>
@@ -173,18 +203,21 @@ export default function Home() {
           </div>
         )}
 
-        {/* Final Section: Matches with Interactions */}
-        {completedMatchesWithInteractions.length > 0 && (
+        {/* Persistent Matches with Interactions */}
+        {matchesWithInteractions.length > 0 && (
           <div className="mt-12">
-            <h2 className="text-3xl font-bold mb-6 text-center">Matches with Interactions</h2>
+            <h2 className="text-3xl font-bold mb-6 text-center text-green-400">Matches with Interactions</h2>
             <div className="space-y-8">
-              {completedMatchesWithInteractions.map((match) => (
-                <div key={match.id} className="bg-gradient-to-r from-gray-800 to-gray-900 p-6 rounded-xl shadow-2xl border border-blue-500/30">
+              {matchesWithInteractions.map((match) => (
+                <div
+                  key={match.id}
+                  className="bg-gradient-to-r from-gray-800 to-gray-900 p-6 rounded-xl shadow-2xl border border-green-500/40"
+                >
                   <h3 className="text-2xl font-semibold mb-4">Match ID: {match.id}</h3>
                   <p className="mb-2">Map: <span className="font-medium">{getHumanMapName(match.map)}</span></p>
                   <p className="mb-6">Started: <span className="font-medium">{match.startedAt} EST</span></p>
 
-                  <h4 className="text-xl font-medium mb-4 text-blue-400">Interactions:</h4>
+                  <h4 className="text-xl font-medium mb-4 text-green-300">Interactions:</h4>
                   <ul className="space-y-4">
                     {match.interactions.map((int, index) => (
                       <li key={index} className="bg-gray-700/70 p-4 rounded-lg border border-gray-600">
@@ -202,7 +235,7 @@ export default function Home() {
           </div>
         )}
 
-        {!loading && !currentMatch && completedMatchesWithInteractions.length === 0 && progressMessage === '' && (
+        {!loading && !currentMatch && matchesWithInteractions.length === 0 && progressMessage === '' && (
           <p className="text-center text-gray-400 mt-8">Enter player names and search to find matches.</p>
         )}
       </div>

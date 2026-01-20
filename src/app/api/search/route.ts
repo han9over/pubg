@@ -30,22 +30,23 @@ const RATE_LIMIT = 10;
 const RATE_WINDOW_MS = 60000;
 let requestTimestamps: number[] = [];
 
-function enforceRateLimit() {
+function enforceRateLimit(enqueue: (msg: any) => void) {
   const now = Date.now();
   requestTimestamps = requestTimestamps.filter(ts => now - ts < RATE_WINDOW_MS);
   if (requestTimestamps.length >= RATE_LIMIT) {
     const oldest = requestTimestamps[0];
-    const waitTime = RATE_WINDOW_MS - (now - oldest);
-    return waitTime;
+    const waitSeconds = Math.ceil((RATE_WINDOW_MS - (now - oldest)) / 1000);
+    enqueue({ progress: `Waiting ${waitSeconds} seconds for rate limit...` });
+    return waitSeconds * 1000; // return milliseconds to sleep
   }
   requestTimestamps.push(now);
   return 0;
 }
 
-async function rateLimitedAxiosGet(url: string, config: any) {
-  const waitTime = enforceRateLimit();
-  if (waitTime > 0) {
-    await new Promise(resolve => setTimeout(resolve, waitTime));
+async function rateLimitedAxiosGet(url: string, config: any, enqueue: (msg: any) => void) {
+  const waitMs = enforceRateLimit(enqueue);
+  if (waitMs > 0) {
+    await new Promise(resolve => setTimeout(resolve, waitMs));
   }
   return axios.get(url, config);
 }
@@ -73,7 +74,8 @@ export async function POST(req: NextRequest) {
         // Get player and opponent account IDs (1 request)
         const playersRes = await rateLimitedAxiosGet(
           `${BASE_URL}/players?filter[playerNames]=${encodeURIComponent(playerName)},${encodeURIComponent(opponentName)}`,
-          { headers }
+          { headers },
+          enqueue
         );
         const playerData = playersRes.data.data.find((p: any) => p.attributes.name.toLowerCase() === playerName.toLowerCase());
         const opponentData = playersRes.data.data.find((p: any) => p.attributes.name.toLowerCase() === opponentName.toLowerCase());
@@ -99,7 +101,7 @@ export async function POST(req: NextRequest) {
           enqueue({ progress: `Processing match ${processedCount}/${matchIds.length} (ID: ${matchId})...` });
 
           // Fetch match details (1 request)
-          const matchRes = await rateLimitedAxiosGet(`${BASE_URL}/matches/${matchId}`, { headers });
+          const matchRes = await rateLimitedAxiosGet(`${BASE_URL}/matches/${matchId}`, { headers }, enqueue);
           const matchData = matchRes.data.data;
           const included = matchRes.data.included;
 
@@ -123,7 +125,7 @@ export async function POST(req: NextRequest) {
 
           // Fetch telemetry (1 request)
           enqueue({ progress: `Fetching telemetry for match ${processedCount}/${matchIds.length}...` });
-          const telemetryRes = await rateLimitedAxiosGet(telemetryUrl, { headers: { Accept: 'application/vnd.api+json' } });
+          const telemetryRes = await rateLimitedAxiosGet(telemetryUrl, { headers: { Accept: 'application/vnd.api+json' } }, enqueue);
           const telemetry = telemetryRes.data;
 
           // Filter interactions
@@ -176,7 +178,7 @@ export async function POST(req: NextRequest) {
 
         // Final completion signal
         enqueue({ progress: 'Processing complete!' });
-        enqueue({ matches: [] }); // Empty array just to trigger the final handling
+        enqueue({ matches: [] }); // Empty array just to trigger final handling
         controller.close();
       } catch (error: any) {
         console.error(error);
