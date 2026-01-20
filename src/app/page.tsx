@@ -1,8 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import axios from 'axios';
-import { format, utcToZonedTime } from 'date-fns-tz';
+import { format } from 'date-fns';
 
 interface Match {
   id: string;
@@ -23,18 +22,56 @@ export default function Home() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [progress, setProgress] = useState<string[]>([]);
 
   const handleSearch = async () => {
     setLoading(true);
     setError('');
     setMatches([]);
+    setProgress([]);
+
     try {
-      const response = await axios.post('/api/search', { playerName, opponentName });
-      setMatches(response.data.matches);
+      const response = await fetch('/api/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerName, opponentName }),
+      });
+
+      if (!response.body) throw new Error('No response body');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const data = JSON.parse(line);
+            if (data.progress) {
+              setProgress(prev => [...prev, data.progress]);
+            } else if (data.matches) {
+              setMatches(data.matches);
+            } else if (data.error) {
+              setError(data.error);
+            }
+          } catch (parseErr) {
+            console.error('Parse error:', parseErr);
+          }
+        }
+      }
     } catch (err) {
       setError('Error fetching data. Check console for details.');
       console.error(err);
     }
+
     setLoading(false);
   };
 
@@ -88,6 +125,18 @@ export default function Home() {
         </div>
 
         {error && <p className="text-red-500 mb-4">{error}</p>}
+
+        {progress.length > 0 && (
+          <div className="bg-gray-800 p-6 rounded-lg shadow-lg mb-8">
+            <h3 className="text-xl font-medium mb-2">Progress:</h3>
+            <ul className="space-y-1 text-sm">
+              {progress.map((msg, index) => (
+                <li key={index}>{msg}</li>
+              ))}
+            </ul>
+            <p className="mt-4 text-gray-400">Note: Due to PUBG API rate limits (10 requests/min), processing may pause briefly to avoid exceeding limits.</p>
+          </div>
+        )}
 
         {matches.length > 0 ? (
           <div className="space-y-6">
