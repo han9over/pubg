@@ -18,16 +18,18 @@ interface Interaction {
 export default function Home() {
   const [playerName, setPlayerName] = useState('');
   const [opponentName, setOpponentName] = useState('');
-  const [matches, setMatches] = useState<Match[]>([]);
+  const [currentMatch, setCurrentMatch] = useState<Match | null>(null);
+  const [completedMatchesWithInteractions, setCompletedMatchesWithInteractions] = useState<Match[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [progress, setProgress] = useState<string[]>([]);
+  const [progressMessage, setProgressMessage] = useState('');
 
   const handleSearch = async () => {
     setLoading(true);
     setError('');
-    setMatches([]);
-    setProgress([]);
+    setCurrentMatch(null);
+    setCompletedMatchesWithInteractions([]);
+    setProgressMessage('');
 
     try {
       const response = await fetch('/api/search', {
@@ -48,16 +50,27 @@ export default function Home() {
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+        buffer = lines.pop() || '';
 
         for (const line of lines) {
           if (!line.trim()) continue;
           try {
             const data = JSON.parse(line);
+
             if (data.progress) {
-              setProgress(prev => [...prev, data.progress]);
+              setProgressMessage(data.progress);
             } else if (data.matches) {
-              setMatches(data.matches);
+              // All processing complete - move matches with interactions to final section
+              const matchesWithInteractions = data.matches.filter((m: Match) => m.interactions.length > 0);
+              setCompletedMatchesWithInteractions(matchesWithInteractions);
+              setCurrentMatch(null); // Clear the last single match display
+              setProgressMessage('Processing complete!');
+            } else if (data.match) {
+              // Individual match completed - display it temporarily
+              const match: Match = data.match;
+              setCurrentMatch(match);
+
+              // If this match has interactions, we'll add it to the final list later
             } else if (data.error) {
               setError(data.error);
             }
@@ -87,7 +100,6 @@ export default function Home() {
       Chimera_Main: 'Haven',
       Kiki_Main: 'Deston',
       Neon_Main: 'Rondo',
-      // Add more as needed
     };
     return mapNames[mapName] || mapName;
   };
@@ -96,7 +108,7 @@ export default function Home() {
     <div className="min-h-screen bg-gradient-to-br from-blue-900 to-black text-white p-8">
       <div className="max-w-4xl mx-auto">
         <h1 className="text-4xl font-bold mb-8 text-center">PUBG Match Interaction Finder</h1>
-        
+
         <div className="bg-gray-800 p-6 rounded-lg shadow-lg mb-8">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <input
@@ -125,49 +137,73 @@ export default function Home() {
 
         {error && <p className="text-red-500 mb-4">{error}</p>}
 
-        {progress.length > 0 && (
-          <div className="bg-gray-800 p-6 rounded-lg shadow-lg mb-8">
-            <h3 className="text-xl font-medium mb-2">Progress:</h3>
-            <ul className="space-y-1 text-sm">
-              {progress.map((msg, index) => (
-                <li key={index}>{msg}</li>
-              ))}
-            </ul>
-            <p className="mt-4 text-gray-400">
-              Note: Due to PUBG API rate limits (10 requests/min), processing may pause briefly to avoid exceeding limits.
+        {/* Current Progress */}
+        {progressMessage && (
+          <div className="bg-gray-800 p-4 rounded-lg mb-6 text-center">
+            <p className="text-lg">{progressMessage}</p>
+            <p className="text-sm text-gray-400 mt-2">
+              Note: Processing may pause briefly due to PUBG API rate limits (10 req/min).
             </p>
           </div>
         )}
 
-        {matches.length > 0 ? (
-          <div className="space-y-6">
-            {matches.map((match) => (
-              <div key={match.id} className="bg-gray-800 p-6 rounded-lg shadow-lg">
-                <h2 className="text-2xl font-semibold mb-2">Match ID: {match.id}</h2>
-                <p className="mb-1">Map: {getHumanMapName(match.map)}</p>
-                <p className="mb-4">Started: {match.startedAt} EST</p>
-                
-                <h3 className="text-xl font-medium mb-2">Interactions:</h3>
-                {match.interactions.length > 0 ? (
-                  <ul className="space-y-2">
+        {/* Currently Processing Match (shown one at a time) */}
+        {currentMatch && (
+          <div className="bg-gray-800 p-6 rounded-lg shadow-lg mb-8 animate-fade-in">
+            <h2 className="text-2xl font-semibold mb-4">Current Match: {currentMatch.id}</h2>
+            <p className="mb-2">Map: {getHumanMapName(currentMatch.map)}</p>
+            <p className="mb-4">Started: {currentMatch.startedAt} EST</p>
+
+            <h3 className="text-xl font-medium mb-3">Interactions:</h3>
+            {currentMatch.interactions.length > 0 ? (
+              <ul className="space-y-3">
+                {currentMatch.interactions.map((int, index) => (
+                  <li key={index} className="bg-gray-700 p-4 rounded">
+                    <p className="font-semibold">{int.type.replace('Log', '')}</p>
+                    <p className="text-sm text-gray-300">Time: {int.timestamp}</p>
+                    <pre className="text-xs bg-gray-900 p-3 rounded mt-2 overflow-auto">
+                      {JSON.stringify(int.details, null, 2)}
+                    </pre>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-gray-400">No direct interactions found in this match.</p>
+            )}
+          </div>
+        )}
+
+        {/* Final Section: Matches with Interactions */}
+        {completedMatchesWithInteractions.length > 0 && (
+          <div className="mt-12">
+            <h2 className="text-3xl font-bold mb-6 text-center">Matches with Interactions</h2>
+            <div className="space-y-8">
+              {completedMatchesWithInteractions.map((match) => (
+                <div key={match.id} className="bg-gradient-to-r from-gray-800 to-gray-900 p-6 rounded-xl shadow-2xl border border-blue-500/30">
+                  <h3 className="text-2xl font-semibold mb-4">Match ID: {match.id}</h3>
+                  <p className="mb-2">Map: <span className="font-medium">{getHumanMapName(match.map)}</span></p>
+                  <p className="mb-6">Started: <span className="font-medium">{match.startedAt} EST</span></p>
+
+                  <h4 className="text-xl font-medium mb-4 text-blue-400">Interactions:</h4>
+                  <ul className="space-y-4">
                     {match.interactions.map((int, index) => (
-                      <li key={index} className="bg-gray-700 p-3 rounded">
-                        <p><strong>Type:</strong> {int.type.replace('Log', '')}</p>
-                        <p><strong>Time:</strong> {int.timestamp}</p>
-                        <pre className="text-sm overflow-auto bg-gray-800 p-2 rounded">
+                      <li key={index} className="bg-gray-700/70 p-4 rounded-lg border border-gray-600">
+                        <p className="font-bold text-lg">{int.type.replace('Log', '')}</p>
+                        <p className="text-sm text-gray-300 mt-1">Time: {int.timestamp}</p>
+                        <pre className="text-sm bg-gray-900 p-3 rounded mt-2 overflow-auto">
                           {JSON.stringify(int.details, null, 2)}
                         </pre>
                       </li>
                     ))}
                   </ul>
-                ) : (
-                  <p className="text-gray-400">No direct interactions (damage/knock/kill) found between the players.</p>
-                )}
-              </div>
-            ))}
+                </div>
+              ))}
+            </div>
           </div>
-        ) : (
-          !loading && <p className="text-center text-gray-400">No matches found yet. Enter names and search.</p>
+        )}
+
+        {!loading && !currentMatch && completedMatchesWithInteractions.length === 0 && progressMessage === '' && (
+          <p className="text-center text-gray-400 mt-8">Enter player names and search to find matches.</p>
         )}
       </div>
     </div>

@@ -71,9 +71,12 @@ export async function POST(req: NextRequest) {
         enqueue({ progress: 'Fetching player data...' });
 
         // Get player and opponent account IDs (1 request)
-        const playersRes = await rateLimitedAxiosGet(`${BASE_URL}/players?filter[playerNames]=${playerName},${opponentName}`, { headers });
-        const playerData = playersRes.data.data.find((p: any) => p.attributes.name === playerName);
-        const opponentData = playersRes.data.data.find((p: any) => p.attributes.name === opponentName);
+        const playersRes = await rateLimitedAxiosGet(
+          `${BASE_URL}/players?filter[playerNames]=${encodeURIComponent(playerName)},${encodeURIComponent(opponentName)}`,
+          { headers }
+        );
+        const playerData = playersRes.data.data.find((p: any) => p.attributes.name.toLowerCase() === playerName.toLowerCase());
+        const opponentData = playersRes.data.data.find((p: any) => p.attributes.name.toLowerCase() === opponentName.toLowerCase());
 
         if (!playerData || !opponentData) {
           enqueue({ error: 'One or both players not found' });
@@ -84,15 +87,16 @@ export async function POST(req: NextRequest) {
         const playerId = playerData.id;
         const opponentId = opponentData.id;
 
-        // Get player's recent matches (included in player data, no extra request)
+        // Get player's recent matches
         const matchIds = playerData.relationships.matches.data.map((m: any) => m.id);
         enqueue({ progress: `Found ${matchIds.length} recent matches. Checking for shared matches...` });
 
-        const sharedMatches: Match[] = [];
+        let processedCount = 0;
 
         for (let i = 0; i < matchIds.length; i++) {
           const matchId = matchIds[i];
-          enqueue({ progress: `Processing match ${i + 1}/${matchIds.length} (ID: ${matchId})...` });
+          processedCount++;
+          enqueue({ progress: `Processing match ${processedCount}/${matchIds.length} (ID: ${matchId})...` });
 
           // Fetch match details (1 request)
           const matchRes = await rateLimitedAxiosGet(`${BASE_URL}/matches/${matchId}`, { headers });
@@ -105,20 +109,20 @@ export async function POST(req: NextRequest) {
           );
 
           if (!opponentParticipant) {
-            enqueue({ progress: `Opponent not found in match ${i + 1}/${matchIds.length}. Skipping.` });
+            enqueue({ progress: `Opponent not in match ${processedCount}/${matchIds.length}. Skipping.` });
             continue;
           }
 
           // Get telemetry URL
           const asset = included.find((item: any) => item.type === 'asset');
           if (!asset) {
-            enqueue({ progress: `No telemetry available for match ${i + 1}/${matchIds.length}. Skipping.` });
+            enqueue({ progress: `No telemetry available for match ${processedCount}/${matchIds.length}. Skipping.` });
             continue;
           }
           const telemetryUrl = asset.attributes.URL;
 
-          // Fetch telemetry (1 request, no Auth header needed for telemetry)
-          enqueue({ progress: `Fetching telemetry for match ${i + 1}/${matchIds.length}...` });
+          // Fetch telemetry (1 request)
+          enqueue({ progress: `Fetching telemetry for match ${processedCount}/${matchIds.length}...` });
           const telemetryRes = await rateLimitedAxiosGet(telemetryUrl, { headers: { Accept: 'application/vnd.api+json' } });
           const telemetry = telemetryRes.data;
 
@@ -157,21 +161,26 @@ export async function POST(req: NextRequest) {
           const estDate = toZonedTime(utcDate, 'America/New_York');
           const formattedDate = format(estDate, 'yyyy-MM-dd HH:mm:ss');
 
-          sharedMatches.push({
+          const matchResult = {
             id: matchId,
             map: matchData.attributes.mapName,
             startedAt: formattedDate,
             interactions,
-          });
+          };
 
-          enqueue({ progress: `Completed match ${i + 1}/${matchIds.length}. Found ${interactions.length} interactions.` });
+          // Send this match immediately to the frontend
+          enqueue({ match: matchResult });
+
+          enqueue({ progress: `Completed match ${processedCount}/${matchIds.length}. Found ${interactions.length} interactions.` });
         }
 
-        enqueue({ matches: sharedMatches });
+        // Final completion signal
+        enqueue({ progress: 'Processing complete!' });
+        enqueue({ matches: [] }); // Empty array just to trigger the final handling
         controller.close();
-      } catch (error) {
+      } catch (error: any) {
         console.error(error);
-        enqueue({ error: 'Failed to fetch data. Check console for details.' });
+        enqueue({ error: error.response?.data?.errors?.[0]?.detail || 'Failed to fetch data. Check console for details.' });
         controller.close();
       }
     },
