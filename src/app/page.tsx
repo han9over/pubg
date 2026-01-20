@@ -1,65 +1,123 @@
-import Image from "next/image";
+'use client';
+
+import { useState } from 'react';
+import axios from 'axios';
+import { format, utcToZonedTime } from 'date-fns-tz';
+
+interface Match {
+  id: string;
+  map: string;
+  startedAt: string;
+  interactions: Interaction[];
+}
+
+interface Interaction {
+  type: string;
+  timestamp: string;
+  details: any;
+}
 
 export default function Home() {
+  const [playerName, setPlayerName] = useState('');
+  const [opponentName, setOpponentName] = useState('');
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSearch = async () => {
+    setLoading(true);
+    setError('');
+    setMatches([]);
+    try {
+      const response = await axios.post('/api/search', { playerName, opponentName });
+      setMatches(response.data.matches);
+    } catch (err) {
+      setError('Error fetching data. Check console for details.');
+      console.error(err);
+    }
+    setLoading(false);
+  };
+
+  const getHumanMapName = (mapName: string) => {
+    const mapNames: { [key: string]: string } = {
+      Erangel_Main: 'Erangel',
+      Baltic_Main: 'Erangel (Remastered)',
+      Desert_Main: 'Miramar',
+      Savage_Main: 'Sanhok',
+      DihorOtok_Main: 'Vikendi',
+      Summerland_Main: 'Karakin',
+      Param_Main: 'Paramo',
+      Tiger_Main: 'Taego',
+      Chimera_Main: 'Haven',
+      Kiki_Main: 'Deston',
+      Neon_Main: 'Rondo',
+      // Add more as needed
+    };
+    return mapNames[mapName] || mapName;
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+    <div className="min-h-screen bg-gradient-to-br from-blue-900 to-black text-white p-8">
+      <div className="max-w-4xl mx-auto">
+        <h1 className="text-4xl font-bold mb-8 text-center">PUBG Match Interaction Finder</h1>
+        
+        <div className="bg-gray-800 p-6 rounded-lg shadow-lg mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <input
+              type="text"
+              placeholder="Your Player Name"
+              value={playerName}
+              onChange={(e) => setPlayerName(e.target.value)}
+              className="bg-gray-700 border border-gray-600 p-3 rounded text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+            <input
+              type="text"
+              placeholder="Opponent Player Name"
+              value={opponentName}
+              onChange={(e) => setOpponentName(e.target.value)}
+              className="bg-gray-700 border border-gray-600 p-3 rounded text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
+            />
+          </div>
+          <button
+            onClick={handleSearch}
+            disabled={loading}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded transition duration-300 disabled:opacity-50"
           >
-            Documentation
-          </a>
+            {loading ? 'Searching...' : 'Search Matches'}
+          </button>
         </div>
-      </main>
+
+        {error && <p className="text-red-500 mb-4">{error}</p>}
+
+        {matches.length > 0 ? (
+          <div className="space-y-6">
+            {matches.map((match) => (
+              <div key={match.id} className="bg-gray-800 p-6 rounded-lg shadow-lg">
+                <h2 className="text-2xl font-semibold mb-2">Match ID: {match.id}</h2>
+                <p className="mb-1">Map: {getHumanMapName(match.map)}</p>
+                <p className="mb-4">Started: {match.startedAt} EST</p>
+                
+                <h3 className="text-xl font-medium mb-2">Interactions:</h3>
+                {match.interactions.length > 0 ? (
+                  <ul className="space-y-2">
+                    {match.interactions.map((int, index) => (
+                      <li key={index} className="bg-gray-700 p-3 rounded">
+                        <p><strong>Type:</strong> {int.type}</p>
+                        <p><strong>Time:</strong> {int.timestamp}</p>
+                        <pre className="text-sm overflow-auto">{JSON.stringify(int.details, null, 2)}</pre>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>No direct interactions found.</p>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-center text-gray-400">No matches found yet. Enter names and search.</p>
+        )}
+      </div>
     </div>
   );
 }
