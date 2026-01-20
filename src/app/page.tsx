@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { format } from 'date-fns';
 
 interface Match {
   id: string;
@@ -134,7 +133,9 @@ export default function Home() {
                 <li key={index}>{msg}</li>
               ))}
             </ul>
-            <p className="mt-4 text-gray-400">Note: Due to PUBG API rate limits (10 requests/min), processing may pause briefly to avoid exceeding limits.</p>
+            <p className="mt-4 text-gray-400">
+              Note: Due to PUBG API rate limits (10 requests/min), processing may pause briefly to avoid exceeding limits.
+            </p>
           </div>
         )}
 
@@ -151,20 +152,22 @@ export default function Home() {
                   <ul className="space-y-2">
                     {match.interactions.map((int, index) => (
                       <li key={index} className="bg-gray-700 p-3 rounded">
-                        <p><strong>Type:</strong> {int.type}</p>
+                        <p><strong>Type:</strong> {int.type.replace('Log', '')}</p>
                         <p><strong>Time:</strong> {int.timestamp}</p>
-                        <pre className="text-sm overflow-auto">{JSON.stringify(int.details, null, 2)}</pre>
+                        <pre className="text-sm overflow-auto bg-gray-800 p-2 rounded">
+                          {JSON.stringify(int.details, null, 2)}
+                        </pre>
                       </li>
                     ))}
                   </ul>
                 ) : (
-                  <p>No direct interactions found.</p>
+                  <p className="text-gray-400">No direct interactions (damage/knock/kill) found between the players.</p>
                 )}
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-center text-gray-400">No matches found yet. Enter names and search.</p>
+          !loading && <p className="text-center text-gray-400">No matches found yet. Enter names and search.</p>
         )}
       </div>
     </div>
