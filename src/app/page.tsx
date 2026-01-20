@@ -74,7 +74,6 @@ export default function Home() {
             if (data.progress) {
               setProgressMessage(data.progress);
 
-              // Handle wait countdown
               if (data.progress.includes('Waiting')) {
                 const match = data.progress.match(/Waiting (\d+) seconds/);
                 if (match && match[1]) {
@@ -87,12 +86,10 @@ export default function Home() {
               const match: Match = data.match;
               setCurrentMatch(match);
 
-              // If this match has interactions, add to persistent list
               if (match.interactions.length > 0) {
                 setMatchesWithInteractions((prev) => [...prev, match]);
               }
             } else if (data.matches) {
-              // Processing complete
               setCurrentMatch(null);
               setProgressMessage('Processing complete!');
               setWaitCountdown(null);
@@ -128,6 +125,13 @@ export default function Home() {
       Neon_Main: 'Rondo',
     };
     return mapNames[mapName] || mapName;
+  };
+
+  const getInteractionIcon = (type: string) => {
+    if (type.includes('TakeDamage')) return { icon: '💥', color: 'text-red-400', label: 'Damage' };
+    if (type.includes('MakeGroggy')) return { icon: '🥊', color: 'text-yellow-400', label: 'Knock' };
+    if (type.includes('KillV2')) return { icon: '☠️', color: 'text-purple-400', label: 'Kill' };
+    return { icon: '🔥', color: 'text-gray-400', label: 'Event' };
   };
 
   return (
@@ -168,7 +172,7 @@ export default function Home() {
           <div className="bg-gray-800 p-4 rounded-lg mb-6 text-center">
             <p className="text-lg font-medium">
               {waitCountdown !== null
-                ? `Waiting ${waitCountdown} seconds for PUBG API rate limit...`
+                ? `Waiting ${waitCountdown} seconds for rate limit...`
                 : progressMessage}
             </p>
             <p className="text-sm text-gray-400 mt-2">
@@ -177,7 +181,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* Current Processing Match */}
+        {/* Current Match */}
         {currentMatch && (
           <div className="bg-gray-800 p-6 rounded-lg shadow-lg mb-8 animate-fade-in">
             <h2 className="text-2xl font-semibold mb-4">Current Match: {currentMatch.id}</h2>
@@ -186,16 +190,35 @@ export default function Home() {
 
             <h3 className="text-xl font-medium mb-3">Interactions:</h3>
             {currentMatch.interactions.length > 0 ? (
-              <ul className="space-y-3">
-                {currentMatch.interactions.map((int, index) => (
-                  <li key={index} className="bg-gray-700 p-4 rounded">
-                    <p className="font-semibold">{int.type.replace('Log', '')}</p>
-                    <p className="text-sm text-gray-300">Time: {int.timestamp}</p>
-                    <pre className="text-xs bg-gray-900 p-3 rounded mt-2 overflow-auto">
-                      {JSON.stringify(int.details, null, 2)}
-                    </pre>
-                  </li>
-                ))}
+              <ul className="space-y-4">
+                {currentMatch.interactions.map((int, index) => {
+                  const { icon, color, label } = getInteractionIcon(int.type);
+                  return (
+                    <li
+                      key={index}
+                      className="bg-gray-700/80 p-4 rounded-lg border border-gray-600 animate-fade-in-up"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className={`text-3xl ${color}`}>{icon}</span>
+                        <div>
+                          <p className="font-bold text-lg">{label}!</p>
+                          <p className="text-sm text-gray-300">
+                            {int.details.attacker} → {int.details.victim}
+                            {int.details.damage ? ` (${int.details.damage} dmg)` : ''}
+                          </p>
+                        </div>
+                      </div>
+                      <details className="mt-3">
+                        <summary className="text-xs text-blue-400 cursor-pointer hover:underline">
+                          Show full details
+                        </summary>
+                        <pre className="text-xs bg-gray-900 p-3 rounded mt-2 overflow-auto">
+                          {JSON.stringify(int.details, null, 2)}
+                        </pre>
+                      </details>
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <p className="text-gray-400">No direct interactions found in this match.</p>
@@ -206,7 +229,7 @@ export default function Home() {
         {/* Persistent Matches with Interactions */}
         {matchesWithInteractions.length > 0 && (
           <div className="mt-12">
-            <h2 className="text-3xl font-bold mb-6 text-center text-green-400">Matches with Interactions</h2>
+            <h2 className="text-3xl font-bold mb-6 text-center text-green-400">🔥 Matches with Interactions 🔥</h2>
             <div className="space-y-8">
               {matchesWithInteractions.map((match) => (
                 <div
@@ -217,17 +240,36 @@ export default function Home() {
                   <p className="mb-2">Map: <span className="font-medium">{getHumanMapName(match.map)}</span></p>
                   <p className="mb-6">Started: <span className="font-medium">{match.startedAt} EST</span></p>
 
-                  <h4 className="text-xl font-medium mb-4 text-green-300">Interactions:</h4>
+                  <h4 className="text-xl font-medium mb-4 text-green-300">Epic Interactions:</h4>
                   <ul className="space-y-4">
-                    {match.interactions.map((int, index) => (
-                      <li key={index} className="bg-gray-700/70 p-4 rounded-lg border border-gray-600">
-                        <p className="font-bold text-lg">{int.type.replace('Log', '')}</p>
-                        <p className="text-sm text-gray-300 mt-1">Time: {int.timestamp}</p>
-                        <pre className="text-sm bg-gray-900 p-3 rounded mt-2 overflow-auto">
-                          {JSON.stringify(int.details, null, 2)}
-                        </pre>
-                      </li>
-                    ))}
+                    {match.interactions.map((int, index) => {
+                      const { icon, color, label } = getInteractionIcon(int.type);
+                      return (
+                        <li
+                          key={index}
+                          className="bg-gray-700/70 p-4 rounded-lg border border-gray-600 animate-fade-in-up"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className={`text-4xl ${color}`}>{icon}</span>
+                            <div>
+                              <p className="font-bold text-lg">{label}!</p>
+                              <p className="text-sm text-gray-300">
+                                {int.details.attacker} → {int.details.victim}
+                                {int.details.damage ? ` (${int.details.damage} dmg)` : ''}
+                              </p>
+                            </div>
+                          </div>
+                          <details className="mt-3">
+                            <summary className="text-xs text-blue-400 cursor-pointer hover:underline">
+                              Show full details
+                            </summary>
+                            <pre className="text-xs bg-gray-900 p-3 rounded mt-2 overflow-auto">
+                              {JSON.stringify(int.details, null, 2)}
+                            </pre>
+                          </details>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               ))}

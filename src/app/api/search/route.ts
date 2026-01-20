@@ -30,21 +30,22 @@ const RATE_LIMIT = 10;
 const RATE_WINDOW_MS = 60000;
 let requestTimestamps: number[] = [];
 
-function enforceRateLimit(enqueue: (msg: any) => void) {
+function enforceRateLimit(enqueue: (msg: any) => void, currentMatchNum?: number, totalMatches?: number) {
   const now = Date.now();
   requestTimestamps = requestTimestamps.filter(ts => now - ts < RATE_WINDOW_MS);
   if (requestTimestamps.length >= RATE_LIMIT) {
     const oldest = requestTimestamps[0];
     const waitSeconds = Math.ceil((RATE_WINDOW_MS - (now - oldest)) / 1000);
-    enqueue({ progress: `Waiting ${waitSeconds} seconds for rate limit...` });
-    return waitSeconds * 1000; // return milliseconds to sleep
+    const matchInfo = currentMatchNum && totalMatches ? ` (processing match ${currentMatchNum}/${totalMatches})` : '';
+    enqueue({ progress: `Waiting ${waitSeconds} seconds for rate limit...${matchInfo}` });
+    return waitSeconds * 1000; // milliseconds to sleep
   }
   requestTimestamps.push(now);
   return 0;
 }
 
-async function rateLimitedAxiosGet(url: string, config: any, enqueue: (msg: any) => void) {
-  const waitMs = enforceRateLimit(enqueue);
+async function rateLimitedAxiosGet(url: string, config: any, enqueue: (msg: any) => void, currentMatchNum?: number, totalMatches?: number) {
+  const waitMs = enforceRateLimit(enqueue, currentMatchNum, totalMatches);
   if (waitMs > 0) {
     await new Promise(resolve => setTimeout(resolve, waitMs));
   }
@@ -71,7 +72,6 @@ export async function POST(req: NextRequest) {
       try {
         enqueue({ progress: 'Fetching player data...' });
 
-        // Get player and opponent account IDs (1 request)
         const playersRes = await rateLimitedAxiosGet(
           `${BASE_URL}/players?filter[playerNames]=${encodeURIComponent(playerName)},${encodeURIComponent(opponentName)}`,
           { headers },
@@ -89,46 +89,41 @@ export async function POST(req: NextRequest) {
         const playerId = playerData.id;
         const opponentId = opponentData.id;
 
-        // Get player's recent matches
         const matchIds = playerData.relationships.matches.data.map((m: any) => m.id);
         enqueue({ progress: `Found ${matchIds.length} recent matches. Checking for shared matches...` });
 
         let processedCount = 0;
+        const totalMatches = matchIds.length;
 
         for (let i = 0; i < matchIds.length; i++) {
           const matchId = matchIds[i];
           processedCount++;
-          enqueue({ progress: `Processing match ${processedCount}/${matchIds.length} (ID: ${matchId})...` });
+          enqueue({ progress: `Processing match ${processedCount}/${totalMatches} (ID: ${matchId})...` });
 
-          // Fetch match details (1 request)
-          const matchRes = await rateLimitedAxiosGet(`${BASE_URL}/matches/${matchId}`, { headers }, enqueue);
+          const matchRes = await rateLimitedAxiosGet(`${BASE_URL}/matches/${matchId}`, { headers }, enqueue, processedCount, totalMatches);
           const matchData = matchRes.data.data;
           const included = matchRes.data.included;
 
-          // Check if opponent is in participants
           const opponentParticipant = included.find(
             (item: any) => item.type === 'participant' && item.attributes.stats.playerId === opponentId
           );
 
           if (!opponentParticipant) {
-            enqueue({ progress: `Opponent not in match ${processedCount}/${matchIds.length}. Skipping.` });
+            enqueue({ progress: `Opponent not in match ${processedCount}/${totalMatches}. Skipping.` });
             continue;
           }
 
-          // Get telemetry URL
           const asset = included.find((item: any) => item.type === 'asset');
           if (!asset) {
-            enqueue({ progress: `No telemetry available for match ${processedCount}/${matchIds.length}. Skipping.` });
+            enqueue({ progress: `No telemetry available for match ${processedCount}/${totalMatches}. Skipping.` });
             continue;
           }
           const telemetryUrl = asset.attributes.URL;
 
-          // Fetch telemetry (1 request)
-          enqueue({ progress: `Fetching telemetry for match ${processedCount}/${matchIds.length}...` });
-          const telemetryRes = await rateLimitedAxiosGet(telemetryUrl, { headers: { Accept: 'application/vnd.api+json' } }, enqueue);
+          enqueue({ progress: `Fetching telemetry for match ${processedCount}/${totalMatches}...` });
+          const telemetryRes = await rateLimitedAxiosGet(telemetryUrl, { headers: { Accept: 'application/vnd.api+json' } }, enqueue, processedCount, totalMatches);
           const telemetry = telemetryRes.data;
 
-          // Filter interactions
           const interactions: Interaction[] = telemetry.filter((event: any) => {
             const isDamage = event._T === 'LogPlayerTakeDamage' &&
               ((event.attacker?.accountId === playerId && event.victim?.accountId === opponentId) ||
@@ -158,7 +153,6 @@ export async function POST(req: NextRequest) {
             },
           }));
 
-          // Convert createdAt (UTC) to EST
           const utcDate = new Date(matchData.attributes.createdAt);
           const estDate = toZonedTime(utcDate, 'America/New_York');
           const formattedDate = format(estDate, 'yyyy-MM-dd HH:mm:ss');
@@ -170,19 +164,17 @@ export async function POST(req: NextRequest) {
             interactions,
           };
 
-          // Send this match immediately to the frontend
           enqueue({ match: matchResult });
 
-          enqueue({ progress: `Completed match ${processedCount}/${matchIds.length}. Found ${interactions.length} interactions.` });
+          enqueue({ progress: `Completed match ${processedCount}/${totalMatches}. Found ${interactions.length} interactions.` });
         }
 
-        // Final completion signal
         enqueue({ progress: 'Processing complete!' });
-        enqueue({ matches: [] }); // Empty array just to trigger final handling
+        enqueue({ matches: [] });
         controller.close();
       } catch (error: any) {
         console.error(error);
-        enqueue({ error: error.response?.data?.errors?.[0]?.detail || 'Failed to fetch data. Check console for details.' });
+        enqueue({ error: error.response?.data?.errors?.[0]?.detail || 'Failed to fetch data.' });
         controller.close();
       }
     },
